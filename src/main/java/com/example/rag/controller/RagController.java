@@ -178,6 +178,46 @@ public class RagController {
         }
     }
     
+    @PostMapping("/ask-external")
+    public ResponseEntity<Map<String, Object>> askExternal(@RequestBody Map<String, String> request) {
+        try {
+            String prompt = request.get("prompt");
+            String externalUrl = request.get("url");
+            
+            if (prompt == null || prompt.trim().isEmpty()) {
+                return ResponseEntity.badRequest().body(Map.of(
+                    "status", "error",
+                    "message", "Prompt cannot be empty"
+                ));
+            }
+            
+            if (externalUrl == null || externalUrl.trim().isEmpty()) {
+                return ResponseEntity.badRequest().body(Map.of(
+                    "status", "error",
+                    "message", "External LLM URL cannot be empty"
+                ));
+            }
+            
+            logger.info("Processing external LLM request: {} to URL: {}", prompt, externalUrl);
+            
+            String response = ragService.generateExternalResponse(prompt, externalUrl);
+            
+            return ResponseEntity.ok(Map.of(
+                "status", "success",
+                "prompt", prompt,
+                "externalUrl", externalUrl,
+                "response", response
+            ));
+            
+        } catch (Exception e) {
+            logger.error("Error processing external LLM request: {}", e.getMessage(), e);
+            return ResponseEntity.internalServerError().body(Map.of(
+                "status", "error",
+                "message", "Failed to process external request: " + e.getMessage()
+            ));
+        }
+    }
+    
     @GetMapping("/health")
     public ResponseEntity<Map<String, String>> health() {
         return ResponseEntity.ok(Map.of(

@@ -9,6 +9,7 @@ import org.springframework.ai.vectorstore.redis.RedisVectorStore.MetadataField;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.web.client.RestTemplate;
 import redis.clients.jedis.JedisPooled;
 
 @Configuration
@@ -44,5 +45,10 @@ public class RagConfiguration {
     @Bean
     public ChatClient chatClient(ChatModel chatModel) {
         return ChatClient.create(chatModel);
+    }
+    
+    @Bean
+    public RestTemplate restTemplate() {
+        return new RestTemplate();
     }
 }

@@ -12,9 +12,17 @@ import org.springframework.ai.document.Document;
 import org.springframework.ai.vectorstore.SearchRequest;
 import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpMethod;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
+import org.springframework.web.client.RestTemplate;
 
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 @Service
@@ -27,6 +35,9 @@ public class RagService {
     
     @Autowired
     private ChatClient chatClient;
+    
+    @Autowired
+    private RestTemplate restTemplate;
     
     private static final String SYSTEM_PROMPT = """
             You are an AI assistant specialized in analyzing macroeconomic data.
@@ -58,6 +69,7 @@ public class RagService {
         
         // Step 2: Prepare context from retrieved documents
         String context = prepareContext(relevantDocs);
+        logger.debug("Prepared context for OpenAI: {}", context);
         
         // Step 3: Create prompt with system message and user query
         String systemPromptWithContext = SYSTEM_PROMPT.replace("{context}", context);
@@ -71,14 +83,22 @@ public class RagService {
         
         // Step 4: Generate response using ChatClient
         try {
-            logger.info("Generating response using OpenAI Chat");
-            String generatedResponse = chatClient.prompt(prompt).call().content();
+            logger.info("Sending request to OpenAI Chat API");
+            logger.debug("OpenAI Request - System Message: {}", systemPromptWithContext);
+            logger.debug("OpenAI Request - User Message: {}", userQuery);
+            logger.debug("OpenAI Request - Full Prompt: {}", prompt.toString());
             
+            long startTime = System.currentTimeMillis();
+            String generatedResponse = chatClient.prompt(prompt).call().content();
+            long endTime = System.currentTimeMillis();
+            
+            logger.info("OpenAI API call completed in {} ms", endTime - startTime);
+            logger.debug("OpenAI Response: {}", generatedResponse);
             logger.info("Successfully generated response");
             return generatedResponse;
             
         } catch (Exception e) {
-            logger.error("Error generating response: {}", e.getMessage(), e);
+            logger.error("Error generating response from OpenAI: {}", e.getMessage(), e);
             return "I encountered an error while processing your request. Please try again later.";
         }
     }
@@ -101,6 +121,66 @@ public class RagService {
                     return content + " " + metadata;
                 })
                 .collect(Collectors.joining("\n\n"));
+    }
+    
+    public String generateExternalResponse(String userQuery, String externalUrl) {
+        logger.info("Processing external LLM query: {} to URL: {}", userQuery, externalUrl);
+        
+        // Step 1: Retrieve relevant documents from vector store
+        List<Document> relevantDocs = retrieveRelevantDocuments(userQuery);
+        
+        if (relevantDocs.isEmpty()) {
+            logger.warn("No relevant documents found for external query: {}", userQuery);
+            return "I couldn't find any relevant macroeconomic data for your query. Please try rephrasing your question or check if the data has been loaded.";
+        }
+        
+        logger.info("Found {} relevant documents for external query", relevantDocs.size());
+        
+        // Step 2: Prepare context from retrieved documents
+        String context = prepareContext(relevantDocs);
+        logger.debug("Prepared context for external LLM: {}", context);
+        
+        // Step 3: Create request payload for external LLM
+        Map<String, Object> requestPayload = new HashMap<>();
+        requestPayload.put("prompt", userQuery);
+        requestPayload.put("context", context);
+        requestPayload.put("system_message", "You are an AI assistant specialized in analyzing macroeconomic data. Use the provided context to answer the user's question.");
+        
+        // Step 4: Call external LLM API
+        try {
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_JSON);
+            
+            HttpEntity<Map<String, Object>> requestEntity = new HttpEntity<>(requestPayload, headers);
+            
+            logger.info("Sending request to external LLM at: {}", externalUrl);
+            logger.debug("External LLM Request payload: {}", requestPayload);
+            
+            long startTime = System.currentTimeMillis();
+            ResponseEntity<Map> response = restTemplate.exchange(
+                externalUrl, 
+                HttpMethod.POST, 
+                requestEntity, 
+                Map.class
+            );
+            long endTime = System.currentTimeMillis();
+            
+            logger.info("External LLM API call completed in {} ms", endTime - startTime);
+            logger.debug("External LLM Response: {}", response.getBody());
+            
+            if (response.getBody() != null && response.getBody().containsKey("response")) {
+                String generatedResponse = response.getBody().get("response").toString();
+                logger.info("Successfully generated response from external LLM");
+                return generatedResponse;
+            } else {
+                logger.warn("External LLM response format unexpected: {}", response.getBody());
+                return "External LLM returned an unexpected response format.";
+            }
+            
+        } catch (Exception e) {
+            logger.error("Error calling external LLM at {}: {}", externalUrl, e.getMessage(), e);
+            return "I encountered an error while calling the external LLM. Please check the URL and try again.";
+        }
     }
     
     private String formatMetadata(Document doc) {
